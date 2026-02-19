@@ -26,6 +26,7 @@ from detection.layering import detect_layering
 from detection.structuring import detect_structuring
 from detection.community import detect_communities, detect_new_accounts
 from detection.scoring import compute_suspicion_scores
+from detection.account_analysis import analyze_all_accounts, analyze_single_account
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB max upload
@@ -39,8 +40,15 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "crossX@2026")
 # This allows the admin panel, account explorer, and trace endpoints to access
 # the same data that was uploaded/analyzed on the dashboard.
 _last_analysis = {
-    "df": None,        # cleaned DataFrame from last upload or demo
-    "results": None,   # full pipeline results dict
+    "df": None,             # cleaned DataFrame from last upload or demo
+    "results": None,        # full pipeline results dict
+    "G": None,              # MultiDiGraph
+    "simple_G": None,       # collapsed DiGraph
+    "cycle_results": None,
+    "velocity_results": None,
+    "layering_results": None,
+    "structuring_results": None,
+    "account_analyses": None,  # 5-step analysis results for all accounts
 }
 
 
@@ -284,6 +292,24 @@ def run_pipeline(df):
         community_results=community_results,
         new_account_results=new_account_results,
     )
+
+    # Run 5-step account analysis
+    account_analyses = analyze_all_accounts(
+        G, simple_G, cleaned_df,
+        cycle_results=cycle_results,
+        velocity_results=velocity_results,
+        layering_results=layering_results,
+        structuring_results=structuring_results,
+    )
+
+    # Store graph + detection objects for later per-account queries
+    _last_analysis["G"] = G
+    _last_analysis["simple_G"] = simple_G
+    _last_analysis["cycle_results"] = cycle_results
+    _last_analysis["velocity_results"] = velocity_results
+    _last_analysis["layering_results"] = layering_results
+    _last_analysis["structuring_results"] = structuring_results
+    _last_analysis["account_analyses"] = account_analyses
 
     elapsed = time.time() - start
 
@@ -876,6 +902,139 @@ def admin_trace():
             return jsonify({"error": True, "errors": [f"Account '{account_id}' not found."]})
 
         return jsonify({"error": False, **result})
+    except Exception as e:
+        return jsonify({"error": True, "errors": [str(e)]})
+
+
+# ══════════════════════════════════════════════════════════════════
+# ACCOUNT ANALYSIS — 5-STEP BEHAVIORAL CLASSIFICATION
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/admin/account-analysis", methods=["POST"])
+@admin_required
+def admin_account_analysis():
+    """Return 5-step behavioral analysis for all accounts or a single account.
+
+    POST body (JSON):
+        account_id (optional): If provided, analyze just that account.
+                                If omitted, return all account analyses.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        target_account = data.get("account_id", "").strip()
+
+        # If we already have cached analyses, use them
+        if _last_analysis["account_analyses"] is not None:
+            analyses = _last_analysis["account_analyses"]
+
+            if target_account:
+                # Find the specific account
+                match = next(
+                    (a for a in analyses if a["account_id"] == target_account),
+                    None,
+                )
+                if match is None:
+                    # Try running a fresh single-account analysis
+                    if _last_analysis["G"] is not None and _last_analysis["df"] is not None:
+                        match = analyze_single_account(
+                            target_account,
+                            _last_analysis["G"],
+                            _last_analysis["simple_G"],
+                            _last_analysis["df"],
+                            _last_analysis["cycle_results"] or {},
+                            _last_analysis["velocity_results"] or {},
+                            _last_analysis["layering_results"] or {},
+                            _last_analysis["structuring_results"] or {},
+                        )
+                    else:
+                        return jsonify({"error": True, "errors": [f"Account '{target_account}' not found."]})
+
+                return jsonify({"error": False, "analysis": match})
+            else:
+                return jsonify({"error": False, "analyses": analyses})
+
+        # No cached data — run the pipeline first
+        if _last_analysis["df"] is not None:
+            cleaned_df = _last_analysis["df"]
+        else:
+            cleaned_df = generate_sample_csv()
+            is_valid, errors, cleaned_df = validate_csv(cleaned_df)
+            if not is_valid:
+                return jsonify({"error": True, "errors": errors})
+
+        # Build graph and run detection
+        G = build_transaction_graph(cleaned_df)
+        simple_G = build_simple_digraph(G)
+        cycle_results = detect_cycles(simple_G)
+        velocity_results = detect_velocity(G, cleaned_df)
+        layering_results = detect_layering(G, cleaned_df)
+        structuring_results = detect_structuring(G, cleaned_df)
+
+        analyses = analyze_all_accounts(
+            G, simple_G, cleaned_df,
+            cycle_results=cycle_results,
+            velocity_results=velocity_results,
+            layering_results=layering_results,
+            structuring_results=structuring_results,
+        )
+
+        # Cache
+        _last_analysis["G"] = G
+        _last_analysis["simple_G"] = simple_G
+        _last_analysis["cycle_results"] = cycle_results
+        _last_analysis["velocity_results"] = velocity_results
+        _last_analysis["layering_results"] = layering_results
+        _last_analysis["structuring_results"] = structuring_results
+        _last_analysis["account_analyses"] = analyses
+
+        if target_account:
+            match = next(
+                (a for a in analyses if a["account_id"] == target_account),
+                None,
+            )
+            if match is None:
+                return jsonify({"error": True, "errors": [f"Account '{target_account}' not found."]})
+            return jsonify({"error": False, "analysis": match})
+
+        return jsonify({"error": False, "analyses": analyses})
+
+    except Exception as e:
+        return jsonify({"error": True, "errors": [str(e)]})
+
+
+@app.route("/account-analysis/<account_id>", methods=["GET"])
+def public_account_analysis(account_id: str):
+    """Public endpoint: get 5-step analysis for a specific account (no auth)."""
+    try:
+        account_id = account_id.strip()
+        if not account_id:
+            return jsonify({"error": True, "errors": ["No account_id provided."]})
+
+        if _last_analysis["account_analyses"] is not None:
+            match = next(
+                (a for a in _last_analysis["account_analyses"]
+                 if a["account_id"] == account_id),
+                None,
+            )
+            if match:
+                return jsonify({"error": False, "analysis": match})
+
+        # Try fresh analysis
+        if _last_analysis["G"] is not None and _last_analysis["df"] is not None:
+            analysis = analyze_single_account(
+                account_id,
+                _last_analysis["G"],
+                _last_analysis["simple_G"],
+                _last_analysis["df"],
+                _last_analysis["cycle_results"] or {},
+                _last_analysis["velocity_results"] or {},
+                _last_analysis["layering_results"] or {},
+                _last_analysis["structuring_results"] or {},
+            )
+            return jsonify({"error": False, "analysis": analysis})
+
+        return jsonify({"error": True, "errors": ["No data analyzed yet. Upload a CSV or run Demo first."]})
+
     except Exception as e:
         return jsonify({"error": True, "errors": [str(e)]})
 
