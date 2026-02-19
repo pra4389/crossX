@@ -35,6 +35,14 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "crossX-money-muling-s3cr3t-
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "crossX@2026")
 
+# ── Server-side storage for the last analyzed dataset ─────────────────────────
+# This allows the admin panel, account explorer, and trace endpoints to access
+# the same data that was uploaded/analyzed on the dashboard.
+_last_analysis = {
+    "df": None,        # cleaned DataFrame from last upload or demo
+    "results": None,   # full pipeline results dict
+}
+
 
 def admin_required(f):
     """Decorator to protect admin routes with session-based auth."""
@@ -542,6 +550,13 @@ def analyze():
             df = parse_csv(file_storage=request.files["file"])
 
         results = run_pipeline(df)
+
+        # Store the analyzed data so admin panel / explorer / trace can use it
+        if not results.get("error"):
+            is_valid, _errs, cleaned_df = validate_csv(df)
+            _last_analysis["df"] = cleaned_df if is_valid else df
+            _last_analysis["results"] = results
+
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": True, "errors": [str(e)]})
@@ -643,21 +658,18 @@ def account_explorer():
     """Return ego-graph + stats for a single account."""
     try:
         account_id = request.json.get("account_id", "").strip()
-        use_sample = request.json.get("use_sample", True)
 
         if not account_id:
             return jsonify({"error": True, "errors": ["No account_id provided."]})
 
-        if use_sample:
-            df = generate_sample_csv()
+        # Use stored data from last analysis; fall back to sample
+        if _last_analysis["df"] is not None:
+            cleaned_df = _last_analysis["df"]
         else:
-            return jsonify({"error": True, "errors": ["Upload not supported yet — use sample data."]})
-
-        # Validate
-        from utils.validation import validate_csv
-        is_valid, errors, cleaned_df = validate_csv(df)
-        if not is_valid:
-            return jsonify({"error": True, "errors": errors})
+            df = generate_sample_csv()
+            is_valid, errors, cleaned_df = validate_csv(df)
+            if not is_valid:
+                return jsonify({"error": True, "errors": errors})
 
         result = build_account_graph(cleaned_df, account_id)
         if result is None:
@@ -673,11 +685,14 @@ def account_explorer():
 
 @app.route("/account-list", methods=["POST"])
 def account_list():
-    """Return all account IDs in the sample dataset for the dropdown."""
+    """Return all account IDs in the current dataset."""
     try:
-        df = generate_sample_csv()
-        from utils.validation import validate_csv
-        _, _, cleaned_df = validate_csv(df)
+        # Use stored data from last analysis; fall back to sample
+        if _last_analysis["df"] is not None:
+            cleaned_df = _last_analysis["df"]
+        else:
+            df = generate_sample_csv()
+            _, _, cleaned_df = validate_csv(df)
         all_accounts = sorted(set(cleaned_df["sender_id"]) | set(cleaned_df["receiver_id"]))
         return jsonify({"error": False, "accounts": all_accounts})
     except Exception as e:
@@ -732,8 +747,17 @@ def admin_page():
 def admin_data():
     """Return all accounts with scores, patterns for the admin table."""
     try:
-        df = generate_sample_csv()
-        results = run_pipeline(df)
+        # Use stored results from last analysis; fall back to sample
+        if _last_analysis["results"] is not None:
+            results = _last_analysis["results"]
+        else:
+            df = generate_sample_csv()
+            results = run_pipeline(df)
+            if not results.get("error"):
+                is_valid, _errs, cleaned_df = validate_csv(df)
+                _last_analysis["df"] = cleaned_df if is_valid else df
+                _last_analysis["results"] = results
+
         if results.get("error"):
             return jsonify(results)
 
@@ -758,8 +782,18 @@ def admin_report():
     """Generate downloadable JSON report in the required output format."""
     try:
         overrides = request.json.get("overrides", {}) if request.json else {}
-        df = generate_sample_csv()
-        results = run_pipeline(df)
+
+        # Use stored results from last analysis; fall back to sample
+        if _last_analysis["results"] is not None:
+            results = _last_analysis["results"]
+        else:
+            df = generate_sample_csv()
+            results = run_pipeline(df)
+            if not results.get("error"):
+                is_valid, _errs, cleaned_df = validate_csv(df)
+                _last_analysis["df"] = cleaned_df if is_valid else df
+                _last_analysis["results"] = results
+
         if results.get("error"):
             return jsonify(results)
 
@@ -828,10 +862,14 @@ def admin_trace():
         if not account_id:
             return jsonify({"error": True, "errors": ["No account_id provided."]})
 
-        df = generate_sample_csv()
-        is_valid, errors, cleaned_df = validate_csv(df)
-        if not is_valid:
-            return jsonify({"error": True, "errors": errors})
+        # Use stored data from last analysis; fall back to sample
+        if _last_analysis["df"] is not None:
+            cleaned_df = _last_analysis["df"]
+        else:
+            df = generate_sample_csv()
+            is_valid, errors, cleaned_df = validate_csv(df)
+            if not is_valid:
+                return jsonify({"error": True, "errors": errors})
 
         result = build_account_graph(cleaned_df, account_id)
         if result is None:
