@@ -1,6 +1,13 @@
+username : admin
+
+password : crossX@2026
+
+
+
+
 # 💰 CrossX — Money Muling Detection Engine
 
-A **graph-theory-based** web application that detects money muling patterns in financial transaction data using cycle detection, smurfing analysis, shell-network tracing, and entropy-based scoring.
+A **graph-theory-based** web application that detects money muling patterns in fiancial transaction data using cycle detection, smurfing analysis, shell-network tracing, and entropy-based scoring.
 
 ---
 
