@@ -45,22 +45,11 @@
         .tab { border-b-2 border-transparent; }
         .tab.active { border-b-color: #4fc3f7; }
         
-        .gradient-bg { background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 25%, #0f172a 50%, #1e1b4b 75%, #0f172a 100%); background-size: 400% 400%; animation: gradient-shift 15s ease infinite; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-
-        .graph-tooltip { position: absolute; pointer-events: none; z-index: 100; background: rgba(10, 20, 35, 0.95); backdrop-filter: blur(12px); border: 1px solid rgba(79, 195, 247, 0.35); border-radius: 10px; padding: 14px 18px; font-size: 12px; color: #e0e6ed; max-width: 320px; min-width: 200px; box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 15px rgba(79,195,247,0.15); opacity: 0; transition: opacity 0.15s ease; line-height: 1.5; }
-        .graph-tooltip.visible { opacity: 1; }
-        .graph-tooltip .tt-title { font-size: 14px; font-weight: 700; color: #4fc3f7; margin-bottom: 8px; }
-        .graph-tooltip .tt-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid rgba(79,195,247,0.08); }
-        .graph-tooltip .tt-label { color: #7a8a9e; font-size: 11px; }
-        .graph-tooltip .tt-value { color: #e0e6ed; font-weight: 600; font-size: 11px; }
-        .graph-tooltip .tt-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; margin-top: 6px; }
-        .graph-tooltip .tt-patterns { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-        .graph-tooltip .tt-patterns span { background: rgba(79,195,247,0.12); color: #81d4fa; padding: 2px 6px; border-radius: 4px; font-size: 9px; }
-        .graph-tooltip .tt-edge-arrow { text-align: center; font-size: 16px; color: #4fc3f7; margin: 4px 0; }
+        .gradient-bg { background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 25%, #0f172a 50%, #1e1b4b 75%, #0f172a 100%); background-size: 400% 400%; animation: gradient-shift 15s ease infinite; }
         @keyframes gradient-shift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
     </style>
 </head>
-<body class="gradient-bg text-gray-100">
+<body class="gradient-bg text-gray-100 min-h-screen">
 
 <!-- MODAL -->
 <div id="detailModal" class="modal">
@@ -74,7 +63,7 @@
 </div>
 
 <!-- HEADER -->
-<header class="animate-fadeInUp border-b border-cyan-500/20 bg-gradient-to-r from-slate-900/80 via-blue-900/50 to-slate-900/80 backdrop-blur-md shadow-2xl shadow-cyan-500/10" style="flex-shrink:0">
+<header class="animate-fadeInUp border-b border-cyan-500/20 bg-gradient-to-r from-slate-900/80 via-blue-900/50 to-slate-900/80 backdrop-blur-md sticky top-0 z-40 shadow-2xl shadow-cyan-500/10">
     <div class="max-w-7xl mx-auto px-4 md:px-6 py-6 flex items-center gap-4">
         <div class="text-3xl animate-pulse-glow">💎</div>
         <div>
@@ -87,7 +76,6 @@
     </div>
 </header>
 
-<div style="flex:1;overflow-y:auto">
 <div class="max-w-7xl mx-auto px-4 md:px-6 py-8">
 
 <!-- UPLOAD -->
@@ -122,6 +110,37 @@
     
     <!-- SUMMARY -->
     <div id="summaryGrid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 md:gap-4"></div>
+    
+    <!-- DOWNLOAD SECTION -->
+    <div class="animate-fadeInUp glass rounded-xl p-4 space-y-4">
+        <div class="flex flex-wrap items-center gap-4">
+            <div class="flex items-center gap-3">
+                <label class="text-cyan-300 font-semibold text-sm">📥 Export:</label>
+                <select id="reportType" onchange="toggleAccountSelect()" class="bg-slate-800 text-gray-200 px-4 py-2 rounded-lg border border-cyan-500/30 focus:border-cyan-400 focus:outline-none text-sm">
+                    <option value="full">Full Report (All Data)</option>
+                    <option value="suspicious">All Suspicious Accounts</option>
+                    <option value="high_risk">High Risk Only (Score ≥50)</option>
+                    <option value="medium_risk">Medium Risk Only (25-49)</option>
+                    <option value="low_risk">Low Risk Only (Score &lt;25)</option>
+                    <option value="fraud_rings">Fraud Rings Only</option>
+                    <option value="single_account">Single Account</option>
+                    <option value="summary">Summary Only</option>
+                </select>
+            </div>
+            
+            <!-- Account selector (hidden by default) -->
+            <div id="accountSelectWrapper" class="hidden flex items-center gap-3">
+                <label class="text-cyan-300 font-semibold text-sm">👤 Account:</label>
+                <select id="accountSelect" class="bg-slate-800 text-gray-200 px-4 py-2 rounded-lg border border-cyan-500/30 focus:border-cyan-400 focus:outline-none text-sm max-w-xs">
+                    <option value="">-- Select Account --</option>
+                </select>
+            </div>
+            
+            <button onclick="downloadReport()" class="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-6 py-3 rounded-lg font-bold hover:shadow-lg hover:shadow-green-500/50 hover:-translate-y-1 transition-all flex items-center gap-2 ml-auto">
+                <span>⬇️</span> Download JSON
+            </button>
+        </div>
+    </div>
     
     <!-- HIGH RISK CARDS -->
     <div class="animate-fadeInUp">
@@ -160,11 +179,8 @@
         
         <!-- TAB: Graph -->
         <div id="tab-graph" class="tab-content hidden">
-            <div class="glass rounded-xl p-6" style="position:relative">
-                <div id="graphContainer" style="width:100%;height:500px;background:#0a1520;border-radius:8px;border:1px solid #1e3a5f;margin-bottom:12px;position:relative">
-                    <div id="graphTooltip" class="graph-tooltip"></div>
-                </div>
-                <p style="font-size:11px;color:#5a6a7e;text-align:center">Hover over nodes or edges to see transaction details • Click a node to view full account analysis</p>
+            <div class="glass rounded-xl p-6">
+                <div id="graphContainer" style="width:100%;height:500px;background:#0a1520;border-radius:8px;border:1px solid #1e3a5f;margin-bottom:12px"></div>
             </div>
         </div>
     </div>
@@ -177,7 +193,6 @@
 <footer class="border-t border-cyan-500/20 bg-gradient-to-t from-slate-950 mt-16 py-8 text-center text-gray-500 text-sm">
     <p>💎 Money Muling Detection Engine v2 — Explainable AI Fraud Detection</p>
 </footer>
-</div>
 
 <script>
 let currentData = null;
@@ -245,7 +260,32 @@ function renderAll(data) {
     renderRiskyAccounts(data.scores);
     renderAllAccounts(data.scores);
     renderPatternBreakdown(data.scores);
+    populateAccountDropdown(data.scores);
     if (data.graph) renderGraph(data.graph);
+}
+
+// Populate account dropdown for single account download
+function populateAccountDropdown(scores) {
+    const select = document.getElementById('accountSelect');
+    select.innerHTML = '<option value="">-- Select Account --</option>';
+    scores.forEach(s => {
+        const riskLabel = s.score >= 50 ? '🔴' : s.score >= 25 ? '🟠' : '🟢';
+        const option = document.createElement('option');
+        option.value = s.account_id;
+        option.textContent = `${riskLabel} ${s.account_id} (${s.score.toFixed(1)})`;
+        select.appendChild(option);
+    });
+}
+
+// Toggle account selector visibility
+function toggleAccountSelect() {
+    const reportType = document.getElementById('reportType').value;
+    const wrapper = document.getElementById('accountSelectWrapper');
+    if (reportType === 'single_account') {
+        wrapper.classList.remove('hidden');
+    } else {
+        wrapper.classList.add('hidden');
+    }
 }
 
 function renderSummary(s) {
@@ -368,277 +408,155 @@ function showAccountDetails(accountId) {
 }
 
 function showPatternDetails(patternName) {
-    // ── Detailed explanations keyed by actual pattern names from the engine ──
     const explanations = {
-        "cycle_participant": {
+        "cycle": {
             title: "🔄 Circular Money Flow",
-            fraudType: "Money Laundering — Cycle Layering",
-            description: "This account participates in circular transaction loops where money flows back to its origin",
+            fraudType: "Money Laundering - Cycle Layering",
+            description: "Detected circular transaction loops where money flows back to origin",
             reasons: [
-                "No legitimate commercial reason for A→B→C→A cycles",
-                "Circular routing hides the original source and beneficial owner of funds",
-                "Creates a false transaction history that confuses investigators",
-                "Deliberately obscures fund traceability across multiple hops"
+                "No legitimate reason for A→B→C→A cycles",
+                "Hides original money source and beneficial owner",
+                "Creates false transaction history",
+                "Deliberately obscures fund traceability"
             ],
-            meaning: "Money flows in circles (A sends to B, B to C, C back to A). Criminals use this to make it impossible to trace where the money came from and who benefits. Each transfer adds 'distance' from the original criminal source. Circular routing is extremely rare in legitimate banking.",
-            riskType: "Layering — Step 2 of Money Laundering",
+            meaning: "Money flows in circles (A sends to B, B to C, C back to A). Criminals use this to make it impossible to trace where the money actually came from and who benefits. Each transfer adds 'distance' from the real criminal.",
+            riskType: "Layering - Step 2 of Money Laundering",
             risk: "HIGH"
         },
-        "fan_in_hub": {
-            title: "🐟 Fan-In Smurfing Hub (Collection Point)",
-            fraudType: "Money Laundering — Smurfing / Collection",
-            description: "This account receives transactions from many different senders — a classic collection-point pattern",
+        "smurfing": {
+            title: "🐟 Smurfing Activity",
+            fraudType: "Money Laundering - Structuring/Smurfing",
+            description: "Multiple small transactions from Many → Few hub accounts",
             reasons: [
-                "Multiple accounts funneling money into a single hub to stay below reporting thresholds",
-                "Creates an illusion of legitimate small deposits through volume",
-                "Recruited 'smurfs' (mules) each deposit small amounts",
-                "Hub consolidates pooled funds for further movement"
+                "Breaking large amounts below $10k reporting threshold",
+                "Creates legitimate appearance through volume",
+                "Multiple accounts avoid detection algorithms",
+                "Hub account consolidates proceeds for further movement"
             ],
-            meaning: "Multiple accounts are sending small amounts to this one account — a textbook collection hub. Criminals recruit people ('smurfs') who each deposit amounts below the $10,000 reporting threshold. The hub then consolidates and forwards the pooled funds. This is highly illegal structuring.",
-            riskType: "Smurfing — Collection Hub / Threshold Evasion",
+            meaning: "Smurfs = people making small deposits to hide the source. Many separate accounts each send small amounts to concentrate at one 'hub' account. This avoided bank reporting requirements. Highly illegal.",
+            riskType: "Structuring - Deliberate Threshold Avoidance",
             risk: "HIGH"
         },
-        "fan_out_hub": {
-            title: "🐟 Fan-Out Smurfing Hub (Distribution Point)",
-            fraudType: "Money Laundering — Smurfing / Distribution",
-            description: "This account sends transactions to many different receivers — a classic distribution pattern",
+        "shell": {
+            title: "🔗 Shell/Pass-Through Account",
+            fraudType: "Money Laundering - Placement/Layering",
+            description: "Account rapidly moves incoming funds outgoing (no economic activity)",
             reasons: [
-                "Single account distributing funds across numerous recipients",
-                "Spreads money to make tracing extremely difficult",
-                "Each recipient receives below-threshold amounts",
-                "Suggests controller distributing criminal proceeds"
+                "No lag between receiving and sending",
+                "No normal business processing time",
+                "No value added or legitimate service provided",
+                "Acts as conduit without commercial substance"
             ],
-            meaning: "This account is the distribution hub — after consolidating illicit funds, it fans them out to many separate accounts. Each recipient gets a small enough amount to avoid triggers. This makes it nearly impossible for investigators to follow the full money trail.",
-            riskType: "Smurfing — Distribution Hub / Threshold Evasion",
-            risk: "HIGH"
-        },
-        "smurfing_peripheral": {
-            title: "🐟 Smurfing Network Participant",
-            fraudType: "Money Laundering — Peripheral Mule",
-            description: "This account is part of a smurfing network but is not the central hub",
-            reasons: [
-                "Participates in structured fan-in or fan-out transfers",
-                "May be a recruited individual moving money on behalf of an organizer",
-                "Sometimes unknowing participants used as 'money mules'",
-                "Pattern connects to a known smurfing hub"
-            ],
-            meaning: "While not the main hub, this account is a spoke in a smurfing wheel — it either feeds money into a collection hub or receives distributions from one. Peripheral mules are often recruited individuals who may not realize they're part of a money laundering operation.",
-            riskType: "Smurfing — Peripheral Mule Account",
+            meaning: "Money comes in → money goes out immediately. Like a mailbox. A legitimate business would hold inventory, pay staff, operate. This account just passes it through, changing sender/receiver.",
+            riskType: "Placement Conduit - Layering",
             risk: "MEDIUM"
         },
-        "shell_passthrough": {
-            title: "🔗 Shell Pass-Through Account",
-            fraudType: "Money Laundering — Relay / Pass-Through Layering",
-            description: "Account acts as a pure relay — money enters and exits quickly with near-zero retention",
-            reasons: [
-                "Near-zero time lag between receiving and forwarding funds",
-                "Retains almost nothing — acts purely as a conduit",
-                "No legitimate business processing or value added",
-                "Each additional hop makes tracing the money harder"
-            ],
-            meaning: "Money comes in and immediately goes back out — this account keeps virtually nothing. Like a mailbox that just forwards everything. A real business would hold inventory, pay staff, and show economic activity. This account exists solely to add another hop in the money trail, making it harder for investigators to trace the true source and destination.",
-            riskType: "Shell / Pass-Through Layering",
-            risk: "HIGH"
-        },
-        "shell_network_member": {
-            title: "🔗 Shell Network Member",
-            fraudType: "Money Laundering — Shell Network",
-            description: "Account belongs to a cluster behaving like shell entities",
-            reasons: [
-                "Part of an interconnected group with high throughput and low retention",
-                "Collectively creates a complex web of transactions",
-                "Designed to frustrate investigators tracing fund flows",
-                "Obscures the beneficial owner of the funds"
-            ],
-            meaning: "This account is part of a group that collectively looks like a network of shell companies — high money throughput, minimal retention, and heavy internal transfers. These networks create such complex webs of transactions that it becomes extremely difficult to identify who actually controls and benefits from the funds.",
-            riskType: "Shell Network — Coordinated Layering",
-            risk: "MEDIUM-HIGH"
-        },
-        "high_velocity": {
-            title: "⚡ High Transaction Velocity",
-            fraudType: "Money Laundering — High-Speed Transfers",
-            description: "Unusually high number of transactions per hour",
-            reasons: [
-                "Transaction rate far exceeds normal account behavior",
-                "Suggests automated or scripted money movement",
-                "Funds pushed through as fast as possible before detection",
-                "Timing pattern is unnatural for legitimate business"
-            ],
-            meaning: "This account processes transactions at an abnormally high rate — far more per hour than typical. Such rapid activity usually indicates automated or scripted money movement, where funds are pushed through as quickly as possible before detection systems or account freezes can intervene.",
-            riskType: "Velocity Anomaly — Automated Movement",
-            risk: "MEDIUM-HIGH"
-        },
-        "rapid_passthrough": {
+        "velocity": {
             title: "⚡ Rapid Pass-Through",
-            fraudType: "Money Laundering — Velocity Layering",
-            description: "Similar amounts received and sent within a very short time window",
+            fraudType: "Money Laundering - Velocity Layering",
+            description: "Money moves through multiple entities at high speed",
             reasons: [
-                "Money arrives and a similar amount leaves within minutes",
-                "Amount matching indicates automated relay behavior",
-                "Timing is too tight for legitimate commercial processing",
-                "Pattern strongly suggests pre-planned money movement"
+                "High transaction frequency suggests coordination",
+                "Similar amounts auto-move, suggests automated routing",
+                "Timing is unnatural for legitimate business",
+                "Indicates pre-planned money movement schedule"
             ],
-            meaning: "Money arrives at this account and a similar (or identical) amount leaves within minutes — the hallmark of a transit relay. When both timing and amounts closely match, it strongly indicates automated layering rather than any legitimate commercial activity. Each rapid hop adds another layer of obfuscation.",
-            riskType: "Rapid Pass-Through — Timed Relay Layering",
-            risk: "HIGH"
+            meaning: "Same amounts rapidly move through 5+ accounts in minutes. Legitimate businesses don't move money this fast without delays for processing/approval/operations. This looks like automated money laundering.",
+            riskType: "Velocity Layering - Pre-Planned Movement",
+            risk: "MEDIUM"
         },
-        "layering_chain": {
-            title: "📚 Transaction Layering Chain",
-            fraudType: "Money Laundering — Layering (Step 2)",
-            description: "Part of a chain where amounts decrease at each step (commission deduction)",
+        "layering": {
+            title: "📚 Transaction Layering",
+            fraudType: "Money Laundering - Layering (Step 2)",
+            description: "Cascading transactions with decreasing amounts",
             reasons: [
-                "Decreasing amounts ($10k→$9.5k→$9k) show commission deductions",
-                "Each intermediary extracts a fee before forwarding the rest",
-                "Creates a long chain that distances money from its criminal source",
-                "This commission-based model is a hallmark of professional laundering"
+                "Decreasing amounts ($10k→$9.5k→$9k) are commission calculations",
+                "Each intermediary deducts fee/commission",
+                "Creates complex chain to trace money origin",
+                "Each layer adds distance from criminal proceeds"
             ],
-            meaning: "A → B ($10,000), B → C ($9,500), C → D ($9,000). Each person in the chain keeps a small 'commission' and forwards the rest. This decreasing-amount pattern is a textbook layering technique — it rewards each mule while making it progressively harder to trace the original criminal proceeds.",
-            riskType: "Layering — Commission-Based Relay Chain",
-            risk: "MEDIUM-HIGH"
+            meaning: "A chain where amounts get smaller at each step: $10k→$9.5k→$9k→$8.5k. Each person takes a cut (commission). Criminals use this to mix illicit money with legitimate handlers, making it untraceable.",
+            riskType: "Layering - Multiple Intermediaries",
+            risk: "MEDIUM"
         },
         "structuring": {
-            title: "💰 Structuring / Threshold Avoidance",
-            fraudType: "Money Laundering — Structuring (FEDERAL CRIME)",
-            description: "Multiple transactions deliberately placed just below a reporting threshold",
+            title: "💰 Structuring/Threshold Avoidance",
+            fraudType: "Money Laundering - Structuring (ILLEGAL)",
+            description: "Intentionally breaking transactions below $10k threshold",
             reasons: [
                 "Deliberately avoiding Currency Transaction Reports (CTR)",
-                "Large sums split into many just-under-threshold transfers",
-                "Illegal under Bank Secrecy Act (31 USC §5324)",
-                "Structuring is itself a federal crime even if underlying funds are clean"
+                "$99k split into 10x $9.9k transfers = clear intent",
+                "Illegal under Bank Secrecy Act",
+                "Known as 'structuring' or 'smurfing' - federal crime"
             ],
-            meaning: "This account repeatedly transacts amounts just under a regulatory reporting limit (e.g., many $9,800–$9,999 transactions when the $10,000 threshold triggers mandatory reporting). Banks must file CTRs for transactions ≥$10,000. Deliberately splitting to avoid this is ILLEGAL by itself — even if the underlying money was legitimate.",
-            riskType: "Structuring — Deliberate Regulatory Evasion",
+            meaning: "Breaking a large amount into many smaller ones, all just under $10,000. Banks must report transactions ≥$10k. Criminals split to avoid this. This is ILLEGAL by itself, even if the underlying funds were clean.",
+            riskType: "Structuring - Federal Crime",
             risk: "HIGH"
         },
-        "amount_repetition": {
-            title: "💰 Repeated Identical Amounts",
-            fraudType: "Money Laundering — Automated Structuring",
-            description: "Same exact dollar amount appears in many transactions",
+        "community": {
+            title: "🌐 Suspicious Community Cluster",
+            fraudType: "Money Laundering - Ring Structure",
+            description: "Tightly connected group transferring among themselves",
             reasons: [
-                "Identical amounts repeated many times is unnatural",
-                "Suggests automated or scripted transfer operations",
-                "Legitimate transactions show natural amount variation",
-                "Pre-set rules rather than organic economic activity"
+                "Heavy internal transfers suggest controlled operation",
+                "All accounts work together, not independent",
+                "Typical structure of organized money laundering rings",
+                "Network isolation from legitimate economy"
             ],
-            meaning: "This account sends or receives the exact same amount over and over. Natural economic activity produces varied amounts — $5,233 one day, $4,876 the next. This rigid repetition suggests automated or scripted transfers, often part of a structured money-moving operation.",
-            riskType: "Amount Repetition — Automation Indicator",
+            meaning: "A group of accounts that mostly transfer money to each other (not to outside accounts). Like a closed club passing money around. Suggests organized money laundering operation with shared control.",
+            riskType: "Ring Structure - Organized Group",
+            risk: "MEDIUM"
+        },
+        "new_account": {
+            title: "✨ New Account Burst",
+            fraudType: "Money Laundering - Fresh Account Exploitation",
+            description: "Newly created account with sudden high activity",
+            reasons: [
+                "Fresh accounts bypass historical checks",
+                "No transaction history to flag patterns",
+                "Often used for one-time operations before closing",
+                "Suggests planned, temporary use"
+            ],
+            meaning: "Account opened yesterday but has massive transactions today. Criminals create new accounts to process funds then abandon them. Old accounts have patterns; new ones are 'clean'.",
+            riskType: "Placement - Fresh Account Usage",
+            risk: "MEDIUM"
+        },
+        "entropy": {
+            title: "📊 Low Information Entropy",
+            fraudType: "Money Laundering - Predictable Pattern",
+            description: "Suspiciously uniform/predictable transaction amounts",
+            reasons: [
+                "Legitimate transactions vary naturally",
+                "Exact same amounts suggest programmed/automated",
+                "Too consistent violates natural randomness",
+                "Indicates pre-set rules, not organic activity"
+            ],
+            meaning: "Every transaction is exactly $5,000. Or all amounts are in $1,000 increments. Real businesses have variation - $5,233 one day, $4,876 another. Same amounts every time = automated/controlled operation.",
+            riskType: "Pattern Anomaly - Algorithmic Control",
             risk: "MEDIUM"
         },
         "amount_consistency": {
             title: "💵 Unusual Amount Consistency",
-            fraudType: "Money Laundering — Pass-Through Indicator",
-            description: "Total money in ≈ total money out (less than 5% retained)",
+            fraudType: "Money Laundering - Artificial Consistency",
+            description: "Transaction amounts too uniform/identical",
             reasons: [
-                "Near-perfect balance of inflows and outflows is extremely rare in legitimate accounts",
-                "Indicates the account is simply relaying funds, not using them",
-                "No economic consumption — just a transit point",
-                "Hallmark behavior of a money mule account"
+                "Natural business transactions show variance",
+                "Perfect consistency indicates manual control",
+                "Suggests pre-planned amounts, not market-driven",
+                "Violates statistical expected behavior"
             ],
-            meaning: "The total amount this account received closely matches what it sent out, retaining less than 5%. Legitimate accounts spend, save, or invest — they don't balance in and out this precisely. This 'pass-through' balance is a strong indicator of a mule account that exists solely to relay funds.",
-            riskType: "Amount Consistency — Mule Account Indicator",
+            meaning: "Every single transaction is exactly $9,000 (or varies <5%). Natural money flows have natural randomness. This uniformity screams 'someone is controlling this'.",
+            riskType: "Amount Control - Manual Override",
             risk: "MEDIUM"
-        },
-        "low_entropy": {
-            title: "📊 Low Transaction Entropy",
-            fraudType: "Money Laundering — Controlled Pattern",
-            description: "Transaction counterparty pattern is highly predictable / concentrated",
-            reasons: [
-                "Very few unique counterparties in a repetitive pattern",
-                "Legitimate accounts interact with a variety of parties",
-                "Concentrated pattern suggests an artificial relationship",
-                "Indicates a dedicated mule funneling to/from a single controller"
-            ],
-            meaning: "This account transacts with very few unique counterparties in a highly repetitive way (low Shannon entropy). Normal accounts interact with dozens of different parties. A concentrated, predictable pattern suggests an artificial relationship — such as a dedicated mule account funneling money to or from a single controller.",
-            riskType: "Low Entropy — Concentrated / Controlled Pattern",
-            risk: "MEDIUM"
-        },
-        "new_account_burst": {
-            title: "✨ New Account Burst",
-            fraudType: "Money Laundering — Fresh Account Exploitation",
-            description: "Recently created account with sudden high transaction volume",
-            reasons: [
-                "Fresh accounts bypass historical behavior checks",
-                "No transaction history exists to flag pattern anomalies",
-                "Often created for one-time operations then abandoned",
-                "Suggests planned, temporary use for money movement"
-            ],
-            meaning: "This account was created very recently but immediately began processing a large number of transactions or high volume of funds. Legitimate new accounts ramp up gradually. A sudden burst suggests the account was opened specifically for a money-laundering operation and will likely be abandoned once the funds are moved.",
-            riskType: "New Account — Burst Activity / Disposable Mule",
-            risk: "MEDIUM-HIGH"
-        },
-        "tight_community": {
-            title: "🌐 Tight Community Cluster",
-            fraudType: "Money Laundering — Coordinated Ring",
-            description: "Member of a tightly interconnected group with heavy internal transfers",
-            reasons: [
-                "Heavy internal transfers suggest a coordinated operation",
-                "All accounts appear to work together, not independently",
-                "Typical structure of organized money laundering rings",
-                "Isolated from the legitimate financial ecosystem"
-            ],
-            meaning: "This account belongs to a small, densely connected group where most transactions stay within the cluster. Such tight communities are uncommon in normal banking — most people transact with a wide variety of parties. This pattern suggests a coordinated ring: accounts controlled by the same entity or criminal group, moving money among themselves to layer and obscure its origin.",
-            riskType: "Community Cluster — Organized Ring Structure",
-            risk: "MEDIUM"
-        },
-        "trust_adjusted": {
-            title: "✅ Trust Multiplier Applied",
-            fraudType: "False-Positive Control",
-            description: "Score reduced — high-degree node with stable timing and no cycle involvement",
-            reasons: [
-                "Very high number of counterparties (merchant-like behavior)",
-                "Regular, predictable transaction timing",
-                "Not involved in any circular routing (cycles)",
-                "Characteristics consistent with legitimate large-volume entity"
-            ],
-            meaning: "This account has characteristics of a legitimate merchant or payroll processor — it transacts with many parties at regular intervals and isn't involved in any cycles. A trust discount was applied to reduce the false-positive risk. This is an informational flag, not a fraud indicator.",
-            riskType: "Trusted Entity — False-Positive Discount",
-            risk: "LOW"
         }
     };
-
-    // Resolve pattern name: try exact match, then prefix match
-    function findExplanation(name) {
-        if (explanations[name]) return explanations[name];
-        // Prefix match for dynamic names like cycle_participant_x8, rapid_passthrough_x3, structuring_below_3000, amount_repeat_x5
-        const prefixes = ["cycle_participant", "rapid_passthrough", "structuring_below", "amount_repeat"];
-        for (const prefix of prefixes) {
-            if (name.startsWith(prefix)) {
-                const base = prefix === "amount_repeat" ? "amount_repetition" : prefix === "structuring_below" ? "structuring" : prefix;
-                if (explanations[base]) {
-                    const info = Object.assign({}, explanations[base]);
-                    const suffix = name.substring(prefix.length);
-                    if (suffix.startsWith("_x")) info.title = info.title + " (×" + suffix.substring(2) + ")";
-                    else if (suffix.startsWith("_below_")) info.title = info.title + " (below $" + suffix.substring(7) + ")";
-                    return info;
-                }
-            }
-        }
-        // Also try backend pattern_details from current data
-        if (currentData && currentData.scores) {
-            for (const acc of currentData.scores) {
-                const pd = (acc.pattern_details || []).find(p => p.name === name);
-                if (pd) {
-                    return {
-                        title: pd.title || name,
-                        fraudType: pd.ml_classification || "Suspicious Pattern",
-                        description: pd.description || "Pattern detected by AI engine",
-                        reasons: ["Pattern flagged as suspicious by the detection engine"],
-                        meaning: pd.meaning || "This pattern was flagged as suspicious.",
-                        riskType: pd.ml_classification || "General Fraud",
-                        risk: pd.risk || "MEDIUM"
-                    };
-                }
-            }
-        }
-        return null;
-    }
-
-    const info = findExplanation(patternName) || {
+    
+    const info = explanations[patternName] || {
         title: patternName,
         fraudType: "Suspicious Pattern",
-        description: "Pattern detected by the AI detection engine",
-        reasons: ["Pattern flagged as suspicious by the detection engine"],
-        meaning: "This pattern was flagged as suspicious and warrants further investigation.",
+        description: "Pattern detected",
+        reasons: ["Pattern flagged as suspicious"],
+        meaning: "Suspicious pattern detected",
         riskType: "General Fraud",
         risk: "MEDIUM"
     };
@@ -663,7 +581,7 @@ function showPatternDetails(patternName) {
             <p style="font-size:11px;color:#a0a8b8;margin-bottom:16px;line-height:1.4;word-wrap:break-word">${info.riskType}</p>
             
             <h3 style="font-size:10px;font-weight:700;color:#81d4fa;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">Risk Level</h3>
-            <span class="risk-badge ${info.risk.includes('HIGH') ? 'risk-high' : info.risk.includes('LOW') ? 'risk-low' : 'risk-medium'}">${info.risk}</span>
+            <span class="risk-badge ${info.risk.includes('HIGH') ? 'risk-high' : 'risk-medium'}">${info.risk}</span>
         </div>
     `;
     
@@ -693,42 +611,24 @@ function switchTab(name) {
 }
 
 // ━━━━━━━━━━━━━ GRAPH ━━━━━━━━━━━━━
-let graphNodeMap = {};
-let graphEdgeMap = {};
-
 function renderGraph(graphData) {
     if (!graphData) return;
     const container = document.getElementById('graphContainer');
-    const tooltip = document.getElementById('graphTooltip');
-
-    // Build lookup maps from the raw graph data
-    graphNodeMap = {};
-    graphData.nodes.forEach(n => { graphNodeMap[n.id] = n; });
-    graphEdgeMap = {};
-    graphData.edges.forEach((e, i) => { graphEdgeMap['e' + i] = e; });
     
     const nodes = graphData.nodes.map(n => ({
         id: n.id,
         label: n.id,
         size: Math.max(12, Math.min(30, n.score / 2 + 15)),
-        color: {
-            background: n.score >= 50 ? '#ef5350' : n.score >= 25 ? '#ffa726' : '#66bb6a',
-            border: n.score >= 50 ? '#c62828' : n.score >= 25 ? '#e65100' : '#2e7d32',
-            highlight: { background: n.score >= 50 ? '#ff8a80' : n.score >= 25 ? '#ffcc80' : '#a5d6a7', border: '#4fc3f7' },
-            hover: { background: n.score >= 50 ? '#ff8a80' : n.score >= 25 ? '#ffcc80' : '#a5d6a7', border: '#4fc3f7' }
-        },
-        borderWidth: 2,
+        color: n.score >= 50 ? '#ef5350' : n.score >= 25 ? '#ffa726' : '#66bb6a',
         font: { color: '#c0cede', size: 10, strokeWidth: 2, strokeColor: '#0a1520' }
     }));
     
-    const edges = graphData.edges.map((e, i) => ({
-        id: 'e' + i,
+    const edges = graphData.edges.map(e => ({
         from: e.from,
         to: e.to,
         arrows: 'to',
-        color: { color: '#1e3a5f', hover: '#4fc3f7', highlight: '#4fc3f7' },
-        width: Math.min(1 + e.count * 0.3, 4),
-        hoverWidth: 0.5
+        color: { color: '#1e3a5f' },
+        width: Math.min(1 + e.count * 0.3, 4)
     }));
     
     if (visNetwork) visNetwork.destroy();
@@ -736,101 +636,145 @@ function renderGraph(graphData) {
         { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) },
         {
             physics: { enabled: true, barnesHut: { gravitationalConstant: -3000, centralGravity: 0.3, springLength: 150 }, stabilization: { iterations: 200 } },
-            interaction: { hover: true, zoomView: true, dragView: true, tooltipDelay: 0 }
+            interaction: { hover: true, zoomView: true, dragView: true }
         }
     );
-
-    // ── Hover: show tooltip for nodes ──
-    visNetwork.on('hoverNode', function(params) {
-        const nodeId = params.node;
-        const n = graphNodeMap[nodeId];
-        if (!n) return;
-
-        const riskColor = n.score >= 50 ? '#ef5350' : n.score >= 25 ? '#ffa726' : '#66bb6a';
-        const riskLabel = n.score >= 50 ? 'HIGH' : n.score >= 25 ? 'MEDIUM' : 'LOW';
-        const riskBg = n.score >= 50 ? 'rgba(239,83,80,0.2)' : n.score >= 25 ? 'rgba(255,167,38,0.2)' : 'rgba(102,187,106,0.2)';
-
-        const patternsHtml = (n.patterns || []).length > 0
-            ? `<div class="tt-patterns">${n.patterns.map(p => `<span>${p}</span>`).join('')}</div>`
-            : '<div style="color:#5a6a7e;font-size:10px;margin-top:4px">No patterns detected</div>';
-
-        tooltip.innerHTML = `
-            <div class="tt-title">${n.id}</div>
-            <div class="tt-row"><span class="tt-label">Suspicion Score</span><span class="tt-value" style="color:${riskColor}">${n.score.toFixed(1)} / 100</span></div>
-            <div class="tt-row"><span class="tt-label">Total Sent</span><span class="tt-value">$${n.total_sent.toLocaleString()}</span></div>
-            <div class="tt-row"><span class="tt-label">Total Received</span><span class="tt-value">$${n.total_received.toLocaleString()}</span></div>
-            <div class="tt-row"><span class="tt-label">Net Flow</span><span class="tt-value" style="color:${n.net_flow >= 0 ? '#66bb6a' : '#ef5350'}">$${n.net_flow.toLocaleString()}</span></div>
-            <div class="tt-row"><span class="tt-label">Transactions</span><span class="tt-value">${n.tx_count}</span></div>
-            <div class="tt-row"><span class="tt-label">Risk Level</span><span class="tt-badge" style="background:${riskBg};color:${riskColor}">${riskLabel}</span></div>
-            ${n.ring_id ? `<div class="tt-row"><span class="tt-label">Ring ID</span><span class="tt-value" style="color:#4fc3f7">${n.ring_id}</span></div>` : ''}
-            ${patternsHtml}
-        `;
-        positionTooltip(params.event, container, tooltip);
-        tooltip.classList.add('visible');
-    });
-
-    visNetwork.on('blurNode', function() {
-        tooltip.classList.remove('visible');
-    });
-
-    // ── Hover: show tooltip for edges ──
-    visNetwork.on('hoverEdge', function(params) {
-        const edgeId = params.edge;
-        const e = graphEdgeMap[edgeId];
-        if (!e) return;
-
-        const fromNode = graphNodeMap[e.from] || {};
-        const toNode = graphNodeMap[e.to] || {};
-        const fromColor = (fromNode.score||0) >= 50 ? '#ef5350' : (fromNode.score||0) >= 25 ? '#ffa726' : '#66bb6a';
-        const toColor = (toNode.score||0) >= 50 ? '#ef5350' : (toNode.score||0) >= 25 ? '#ffa726' : '#66bb6a';
-
-        tooltip.innerHTML = `
-            <div class="tt-title">Transaction Path</div>
-            <div style="text-align:center;margin:6px 0">
-                <span style="color:${fromColor};font-weight:700">${e.from}</span>
-                <span style="color:#4fc3f7;margin:0 6px">→</span>
-                <span style="color:${toColor};font-weight:700">${e.to}</span>
-            </div>
-            <div class="tt-row"><span class="tt-label">Total Amount</span><span class="tt-value">$${e.amount.toLocaleString()}</span></div>
-            <div class="tt-row"><span class="tt-label">Transaction Count</span><span class="tt-value">${e.count}</span></div>
-            <div class="tt-row"><span class="tt-label">Avg per Transaction</span><span class="tt-value">$${(e.amount / Math.max(e.count, 1)).toLocaleString(undefined, {maximumFractionDigits: 2})}</span></div>
-            <div class="tt-row"><span class="tt-label">Sender Score</span><span class="tt-value" style="color:${fromColor}">${(fromNode.score||0).toFixed(1)}</span></div>
-            <div class="tt-row"><span class="tt-label">Receiver Score</span><span class="tt-value" style="color:${toColor}">${(toNode.score||0).toFixed(1)}</span></div>
-        `;
-        positionTooltip(params.event, container, tooltip);
-        tooltip.classList.add('visible');
-    });
-
-    visNetwork.on('blurEdge', function() {
-        tooltip.classList.remove('visible');
-    });
-
-    // ── Click node: open full account detail modal ──
-    visNetwork.on('click', function(params) {
-        tooltip.classList.remove('visible');
-        if (params.nodes && params.nodes.length > 0) {
-            showAccountDetails(params.nodes[0]);
-        }
-    });
-
-    // Hide tooltip on drag / zoom
-    visNetwork.on('dragStart', function() { tooltip.classList.remove('visible'); });
-    visNetwork.on('zoom', function() { tooltip.classList.remove('visible'); });
 }
 
-function positionTooltip(event, container, tooltip) {
-    const rect = container.getBoundingClientRect();
-    let x = (event.center ? event.center.x : event.clientX) - rect.left + 15;
-    let y = (event.center ? event.center.y : event.clientY) - rect.top + 15;
-    // Keep tooltip inside the container
-    const tw = tooltip.offsetWidth || 280;
-    const th = tooltip.offsetHeight || 180;
-    if (x + tw > rect.width - 10) x = x - tw - 30;
-    if (y + th > rect.height - 10) y = y - th - 30;
-    if (x < 5) x = 5;
-    if (y < 5) y = 5;
-    tooltip.style.left = x + 'px';
-    tooltip.style.top = y + 'px';
+// ━━━━━━━━━━━━━ DOWNLOAD REPORT ━━━━━━━━━━━━━
+function downloadReport() {
+    if (!currentData || !currentData.report_json) {
+        alert('No report data available. Please analyze data first.');
+        return;
+    }
+    
+    // Parse the report JSON string
+    let report;
+    try {
+        report = JSON.parse(currentData.report_json);
+    } catch (e) {
+        alert('Error parsing report data.');
+        return;
+    }
+    
+    // Get selected report type
+    const reportType = document.getElementById('reportType').value;
+    let filteredReport = {};
+    let filename = 'detection_report';
+    
+    switch (reportType) {
+        case 'full':
+            filteredReport = report;
+            filename = 'full_detection_report';
+            break;
+        case 'suspicious':
+            filteredReport = {
+                suspicious_accounts: report.suspicious_accounts,
+                summary: {
+                    total_accounts_analyzed: report.summary.total_accounts_analyzed,
+                    suspicious_accounts_flagged: report.suspicious_accounts.length,
+                    export_type: 'all_suspicious_accounts'
+                }
+            };
+            filename = 'suspicious_accounts_report';
+            break;
+        case 'high_risk':
+            const highRisk = report.suspicious_accounts.filter(a => a.suspicion_score >= 50);
+            filteredReport = {
+                suspicious_accounts: highRisk,
+                summary: {
+                    total_accounts_analyzed: report.summary.total_accounts_analyzed,
+                    high_risk_accounts_flagged: highRisk.length,
+                    export_type: 'high_risk_only',
+                    score_threshold: '>=50'
+                }
+            };
+            filename = 'high_risk_accounts_report';
+            break;
+        case 'medium_risk':
+            const mediumRisk = report.suspicious_accounts.filter(a => a.suspicion_score >= 25 && a.suspicion_score < 50);
+            filteredReport = {
+                suspicious_accounts: mediumRisk,
+                summary: {
+                    total_accounts_analyzed: report.summary.total_accounts_analyzed,
+                    medium_risk_accounts_flagged: mediumRisk.length,
+                    export_type: 'medium_risk_only',
+                    score_threshold: '25-49'
+                }
+            };
+            filename = 'medium_risk_accounts_report';
+            break;
+        case 'low_risk':
+            const lowRisk = report.suspicious_accounts.filter(a => a.suspicion_score < 25);
+            filteredReport = {
+                suspicious_accounts: lowRisk,
+                summary: {
+                    total_accounts_analyzed: report.summary.total_accounts_analyzed,
+                    low_risk_accounts_flagged: lowRisk.length,
+                    export_type: 'low_risk_only',
+                    score_threshold: '<25'
+                }
+            };
+            filename = 'low_risk_accounts_report';
+            break;
+        case 'fraud_rings':
+            filteredReport = {
+                fraud_rings: report.fraud_rings,
+                summary: {
+                    fraud_rings_detected: report.fraud_rings.length,
+                    export_type: 'fraud_rings_only'
+                }
+            };
+            filename = 'fraud_rings_report';
+            break;
+        case 'single_account':
+            const selectedAccountId = document.getElementById('accountSelect').value;
+            if (!selectedAccountId) {
+                alert('Please select an account to download.');
+                return;
+            }
+            const accountData = report.suspicious_accounts.find(a => a.account_id === selectedAccountId);
+            if (!accountData) {
+                alert('Account not found in report.');
+                return;
+            }
+            // Find fraud rings this account belongs to
+            const accountRings = report.fraud_rings.filter(r => 
+                r.member_accounts.includes(selectedAccountId)
+            );
+            filteredReport = {
+                account: accountData,
+                associated_fraud_rings: accountRings,
+                summary: {
+                    account_id: selectedAccountId,
+                    suspicion_score: accountData.suspicion_score,
+                    patterns_detected: accountData.detected_patterns.length,
+                    rings_involved: accountRings.length,
+                    export_type: 'single_account'
+                }
+            };
+            filename = `account_${selectedAccountId}_report`;
+            break;
+        case 'summary':
+            filteredReport = {
+                summary: report.summary
+            };
+            filename = 'summary_report';
+            break;
+        default:
+            filteredReport = report;
+    }
+    
+    // Create the blob and download
+    const blob = new Blob([JSON.stringify(filteredReport, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 window.addEventListener('load', () => {

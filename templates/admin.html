@@ -21,7 +21,7 @@
         .glass { background: rgba(15, 25, 35, 0.5); backdrop-filter: blur(12px); border: 1px solid rgba(251,191,36,0.12); transition: all 0.3s ease; }
         .glass:hover { background: rgba(15, 25, 35, 0.65); border-color: rgba(251,191,36,0.3); }
 
-        .gradient-bg { background: linear-gradient(135deg, #0f172a 0%, #1a1a2e 30%, #16213e 60%, #0f172a 100%); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        .gradient-bg { background: linear-gradient(135deg, #0f172a 0%, #1a1a2e 30%, #16213e 60%, #0f172a 100%); min-height: 100vh; }
 
         .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 1000; align-items: center; justify-content: center; }
         .modal.active { display: flex; }
@@ -74,19 +74,8 @@
     </div>
 </div>
 
-<!-- 5-STEP ACCOUNT ANALYSIS MODAL -->
-<div id="analysisModal" class="modal">
-    <div class="modal-content" style="max-width:960px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-            <h2 id="analysisTitle" style="font-size:20px;font-weight:700;color:#fbbf24">🔬 5-Step Account Analysis</h2>
-            <button onclick="closeAnalysisModal()" style="background:none;border:none;font-size:24px;color:#666;cursor:pointer">✕</button>
-        </div>
-        <div id="analysisBody" style="overflow-y:auto;flex:1"></div>
-    </div>
-</div>
-
 <!-- HEADER -->
-<header class="animate-fadeInUp border-b border-yellow-500/20 bg-gradient-to-r from-slate-900/90 via-yellow-900/30 to-slate-900/90 backdrop-blur-md shadow-2xl shadow-yellow-500/10" style="flex-shrink:0">
+<header class="animate-fadeInUp border-b border-yellow-500/20 bg-gradient-to-r from-slate-900/90 via-yellow-900/30 to-slate-900/90 backdrop-blur-md sticky top-0 z-40 shadow-2xl shadow-yellow-500/10">
     <div class="max-w-7xl mx-auto px-4 md:px-6 py-5 flex items-center justify-between">
         <div class="flex items-center gap-4">
             <div class="text-3xl animate-pulse-glow">🛡️</div>
@@ -95,14 +84,10 @@
                 <p class="text-xs text-yellow-300/60 mt-1">Account Management • Flag/Unflag • Transaction Tracing</p>
             </div>
         </div>
-        <div class="flex items-center gap-3">
-            <a href="/" class="btn btn-primary px-5 py-2 rounded-lg text-sm font-bold no-underline">← Back to Dashboard</a>
-            <button onclick="logout()" class="px-4 py-2 rounded-lg text-sm font-bold" style="background:rgba(239,83,80,0.15);border:1px solid rgba(239,83,80,0.3);color:#ef5350;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='rgba(239,83,80,0.3)'" onmouseout="this.style.background='rgba(239,83,80,0.15)'">🔒 Logout</button>
-        </div>
+        <a href="/" class="btn btn-primary px-5 py-2 rounded-lg text-sm font-bold no-underline">← Back to Dashboard</a>
     </div>
 </header>
 
-<div style="flex:1;overflow-y:auto">
 <div class="max-w-7xl mx-auto px-4 md:px-6 py-8">
 
     <!-- LOADING -->
@@ -153,7 +138,6 @@
             <button onclick="bulkAction('flagged')" class="btn btn-flag">🔴 Flag All High-Risk</button>
             <button onclick="bulkAction('review')" class="btn btn-review">🟡 Review All Medium</button>
             <button onclick="exportCSV()" class="btn btn-trace">📥 Export CSV</button>
-            <button onclick="downloadJSON()" class="btn btn-primary px-4">📄 Download JSON Report</button>
         </div>
 
     </div>
@@ -163,7 +147,6 @@
 <footer class="border-t border-yellow-500/15 mt-16 py-6 text-center text-gray-600 text-xs">
     <p>🛡️ Money Muling Detection — Admin Panel v1.0</p>
 </footer>
-</div>
 
 <script>
 let allAccounts = [];          // full dataset from /admin/data
@@ -178,22 +161,8 @@ window.addEventListener('load', () => {
     loadData();
 });
 
-// ───────────── AUTH HELPERS ─────────────
-function authFetch(url, opts = {}) {
-    return fetch(url, opts).then(r => {
-        if (r.status === 401) { window.location.href = '/admin/login'; throw new Error('Session expired'); }
-        return r;
-    });
-}
-
-function logout() {
-    fetch('/admin/logout', { method: 'POST' })
-        .then(() => { window.location.href = '/admin/login'; })
-        .catch(() => { window.location.href = '/admin/login'; });
-}
-
 function loadData() {
-    authFetch('/admin/data', { method: 'POST' })
+    fetch('/admin/data', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             if (data.error) { alert(data.errors.join('\n')); return; }
@@ -204,7 +173,7 @@ function loadData() {
             document.getElementById('loading').classList.add('hidden');
             document.getElementById('mainContent').classList.remove('hidden');
         })
-        .catch(err => { if (err.message !== 'Session expired') alert('Failed to load data: ' + err.message); });
+        .catch(err => alert('Failed to load data: ' + err.message));
 }
 
 // ───────────── STATS ─────────────
@@ -283,7 +252,6 @@ function renderTable() {
                     <button onclick="setStatus('${a.account_id}','review')" class="btn btn-review text-[10px] px-2 py-1" title="Review">🟡 Review</button>
                     <button onclick="setStatus('${a.account_id}','cleared')" class="btn btn-clear text-[10px] px-2 py-1" title="Clear">🟢 Clear</button>
                     <button onclick="traceAccount('${a.account_id}')" class="btn btn-trace text-[10px] px-2 py-1" title="Trace Transactions">🔍 Trace</button>
-                    <button onclick="analyzeAccount('${a.account_id}')" class="btn text-[10px] px-2 py-1" style="background:rgba(171,71,188,0.2);color:#ce93d8;border:1px solid rgba(171,71,188,0.3)" title="5-Step Analysis">🔬 Analyze</button>
                 </div>
             </td>
         </tr>
@@ -366,7 +334,7 @@ function traceAccount(accountId) {
     document.getElementById('traceModal').classList.add('active');
     document.body.classList.add('modal-open');
 
-    authFetch('/admin/trace', {
+    fetch('/admin/trace', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account_id: accountId })
@@ -512,232 +480,6 @@ function closeTraceModal() {
 document.getElementById('traceModal').addEventListener('click', e => {
     if (e.target.id === 'traceModal') closeTraceModal();
 });
-document.getElementById('analysisModal').addEventListener('click', e => {
-    if (e.target.id === 'analysisModal') closeAnalysisModal();
-});
-
-// ───────────── 5-STEP ACCOUNT ANALYSIS ─────────────
-function analyzeAccount(accountId) {
-    document.getElementById('analysisTitle').textContent = `🔬 5-Step Analysis — ${accountId}`;
-    document.getElementById('analysisBody').innerHTML = `
-        <div class="text-center py-10">
-            <div class="w-10 h-10 border-3 border-slate-600 border-t-purple-400 rounded-full animate-spin mx-auto mb-4" style="border-width:3px"></div>
-            <p class="text-gray-400 text-sm">Running 5-step behavioral analysis...</p>
-        </div>`;
-    document.getElementById('analysisModal').classList.add('active');
-    document.body.classList.add('modal-open');
-
-    authFetch('/admin/account-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: accountId })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) {
-            document.getElementById('analysisBody').innerHTML = `<p class="text-red-400">${data.errors.join(', ')}</p>`;
-            return;
-        }
-        renderAnalysis(data.analysis, accountId);
-    })
-    .catch(err => {
-        document.getElementById('analysisBody').innerHTML = `<p class="text-red-400">Error: ${err.message}</p>`;
-    });
-}
-
-function closeAnalysisModal() {
-    document.getElementById('analysisModal').classList.remove('active');
-    document.body.classList.remove('modal-open');
-}
-
-function renderAnalysis(a, accountId) {
-    const classColors = {
-        SUSPICIOUS: { bg: 'rgba(239,83,80,0.15)', border: 'rgba(239,83,80,0.4)', text: '#ef5350', icon: '🚨' },
-        MERCHANT: { bg: 'rgba(102,187,106,0.15)', border: 'rgba(102,187,106,0.4)', text: '#66bb6a', icon: '🏪' },
-        FRIEND: { bg: 'rgba(79,195,247,0.15)', border: 'rgba(79,195,247,0.4)', text: '#4fc3f7', icon: '🤝' },
-        UNKNOWN: { bg: 'rgba(158,158,158,0.15)', border: 'rgba(158,158,158,0.4)', text: '#9e9e9e', icon: '❓' },
-    };
-    const cc = classColors[a.classification] || classColors.UNKNOWN;
-    const riskColor = a.risk_score >= 50 ? '#ef5350' : a.risk_score >= 25 ? '#ffa726' : '#66bb6a';
-    const d = a.details || {};
-    const graph = d.graph || {};
-    const timing = d.timing || {};
-    const amount = d.amount || {};
-
-    function scoreBar(label, score, color) {
-        return `
-            <div style="margin-bottom:8px">
-                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-                    <span class="text-gray-400">${label}</span>
-                    <span style="color:${color};font-weight:700">${score.toFixed(1)}</span>
-                </div>
-                <div style="background:rgba(255,255,255,0.05);border-radius:4px;height:8px;overflow:hidden">
-                    <div style="background:${color};width:${score}%;height:100%;border-radius:4px;transition:width 0.6s ease"></div>
-                </div>
-            </div>`;
-    }
-
-    function boolBadge(val, trueText, falseText) {
-        return val
-            ? `<span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(239,83,80,0.15);color:#ef5350">${trueText}</span>`
-            : `<span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(102,187,106,0.1);color:#66bb6a">${falseText}</span>`;
-    }
-
-    let html = `
-    <!-- CLASSIFICATION BANNER -->
-    <div style="background:${cc.bg};border:1px solid ${cc.border};border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:16px">
-        <div style="font-size:40px">${cc.icon}</div>
-        <div style="flex:1">
-            <div style="font-size:22px;font-weight:800;color:${cc.text}">${a.classification}</div>
-            <div class="text-gray-400 text-xs mt-1">Confidence: ${a.classification_confidence}%</div>
-        </div>
-        <div style="text-align:right">
-            <div style="font-size:32px;font-weight:800;color:${riskColor}">${a.risk_score}</div>
-            <div class="text-gray-500 text-[10px] uppercase">Risk Score</div>
-        </div>
-    </div>
-
-    <!-- SCORE BREAKDOWN -->
-    <div class="glass rounded-xl p-4 mb-4">
-        <h3 class="text-sm font-bold text-yellow-300 mb-3 uppercase">Score Breakdown</h3>
-        ${scoreBar('Step 1 — Graph Backtracking', a.graph_score, '#4fc3f7')}
-        ${scoreBar('Step 2 — Timing Behavior', a.timing_score, '#ffa726')}
-        ${scoreBar('Step 3 — Amount Patterns', a.amount_pattern_score, '#ce93d8')}
-    </div>
-
-    <!-- CLASSIFICATION SCORES -->
-    <div class="glass rounded-xl p-4 mb-4">
-        <h3 class="text-sm font-bold text-yellow-300 mb-3 uppercase">Classification Scores</h3>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-            ${Object.entries(a.classification_scores || {}).map(([cls, sc]) => {
-                const isActive = cls === a.classification;
-                const clr = (classColors[cls] || classColors.UNKNOWN);
-                return `<div style="text-align:center;padding:10px;border-radius:8px;background:${isActive ? clr.bg : 'rgba(255,255,255,0.02)'};border:1px solid ${isActive ? clr.border : 'rgba(255,255,255,0.05)'}">
-                    <div style="font-size:18px;font-weight:800;color:${isActive ? clr.text : '#4a5568'}">${sc}</div>
-                    <div style="font-size:9px;text-transform:uppercase;color:${isActive ? clr.text : '#6b7280'};margin-top:2px">${cls}</div>
-                </div>`;
-            }).join('')}
-        </div>
-    </div>
-
-    <!-- STEP 1 — GRAPH -->
-    <div class="glass rounded-xl p-4 mb-4">
-        <h3 class="text-sm font-bold text-cyan-300 mb-3">STEP 1 — Graph Backtracking</h3>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm font-bold" style="color:${graph.cycle_count > 0 ? '#ef5350' : '#66bb6a'}">${graph.cycle_count}</div>
-                <div class="text-[9px] text-gray-500 uppercase">Cycles Found</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(a.cycle_detected, 'YES', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Cycle Detected</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(graph.rapid_forwarding, 'YES (' + graph.rapid_event_count + ')', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Rapid Forwarding</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm font-bold text-gray-300">${graph.flow_type}</div>
-                <div class="text-[9px] text-gray-500 uppercase">Flow Type</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm font-bold text-gray-300">${graph.short_loops_count}</div>
-                <div class="text-[9px] text-gray-500 uppercase">Short Loops</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- STEP 2 — TIMING -->
-    <div class="glass rounded-xl p-4 mb-4">
-        <h3 class="text-sm font-bold text-orange-300 mb-3">STEP 2 — Timing Behavior Analysis</h3>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm font-bold" style="color:${timing.cv_label === 'bursty' ? '#ef5350' : timing.cv_label === 'moderate' ? '#ffa726' : '#66bb6a'}">${timing.cv !== null ? timing.cv.toFixed(4) : 'N/A'}</div>
-                <div class="text-[9px] text-gray-500 uppercase">CV (${timing.cv_label})</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(timing.burst_detected, 'YES (' + timing.burst_count + ')', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Burst Detected</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm font-bold" style="color:${timing.off_hours_ratio > 0.5 ? '#ef5350' : '#66bb6a'}">${(timing.off_hours_ratio * 100).toFixed(1)}%</div>
-                <div class="text-[9px] text-gray-500 uppercase">Off-Hours Ratio</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(timing.automation_detected, timing.automation_pattern || 'YES', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Automation</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- STEP 3 — AMOUNTS -->
-    <div class="glass rounded-xl p-4 mb-4">
-        <h3 class="text-sm font-bold text-purple-300 mb-3">STEP 3 — Distinct Amount Analysis</h3>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(amount.repetitive_amounts, 'YES (×' + amount.repeat_count + ')', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Repetitive Amounts</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(amount.below_threshold, 'YES', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Below AML Threshold</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(amount.layering_detected, 'YES', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Layering Chain</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(amount.round_amounts, (amount.round_amount_ratio * 100).toFixed(0) + '%', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Round Amounts</div>
-            </div>
-            <div class="glass rounded-lg p-3 text-center">
-                <div class="text-sm">${boolBadge(amount.natural_variance, 'YES', 'NO')}</div>
-                <div class="text-[9px] text-gray-500 uppercase mt-1">Natural Variance</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- FINDINGS -->
-    <div class="glass rounded-xl p-4">
-        <h3 class="text-sm font-bold text-yellow-300 mb-3 uppercase">Reasoning & Findings</h3>
-        <div class="text-gray-300 text-sm mb-3" style="line-height:1.6">${a.reasoning_summary}</div>
-        ${(a.findings || []).length > 0 ? `
-            <div style="margin-top:8px">
-                ${a.findings.map(f => `
-                    <div style="padding:6px 12px;margin:4px 0;background:rgba(251,191,36,0.05);border-left:3px solid #fbbf24;border-radius:0 4px 4px 0;font-size:12px;color:#d1d5db">${f}</div>
-                `).join('')}
-            </div>
-        ` : ''}
-    </div>
-    `;
-
-    document.getElementById('analysisBody').innerHTML = html;
-}
-
-// ───────────── JSON REPORT DOWNLOAD ─────────────
-function downloadJSON() {
-    const btn = event.target;
-    btn.disabled = true;
-    btn.textContent = '⏳ Generating...';
-
-    authFetch('/admin/report', { method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overrides: adminOverrides })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) { alert(data.errors.join('\n')); return; }
-        const blob = new Blob([JSON.stringify(data.report, null, 4)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'detection_report.json';
-        link.click();
-        URL.revokeObjectURL(url);
-    })
-    .catch(err => alert('Error: ' + err.message))
-    .finally(() => { btn.disabled = false; btn.textContent = '📄 Download JSON Report'; });
-}
 
 // ───────────── EXPORT ─────────────
 function exportCSV() {

@@ -11,8 +11,7 @@ import time
 import json
 import pandas as pd
 from pathlib import Path
-from functools import wraps
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify
 
 from utils.validation import validate_csv
 from utils.graph_builder import build_transaction_graph, build_simple_digraph
@@ -26,43 +25,9 @@ from detection.layering import detect_layering
 from detection.structuring import detect_structuring
 from detection.community import detect_communities, detect_new_accounts
 from detection.scoring import compute_suspicion_scores
-from detection.account_analysis import analyze_all_accounts, analyze_single_account
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB max upload
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "crossX-money-muling-s3cr3t-key-2026")
-
-# ── Admin credentials ─────────────────────────────────────────────────────────
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "crossX@2026")
-
-# ── Server-side storage for the last analyzed dataset ─────────────────────────
-# This allows the admin panel, account explorer, and trace endpoints to access
-# the same data that was uploaded/analyzed on the dashboard.
-_last_analysis = {
-    "df": None,             # cleaned DataFrame from last upload or demo
-    "results": None,        # full pipeline results dict
-    "G": None,              # MultiDiGraph
-    "simple_G": None,       # collapsed DiGraph
-    "cycle_results": None,
-    "velocity_results": None,
-    "layering_results": None,
-    "structuring_results": None,
-    "account_analyses": None,  # 5-step analysis results for all accounts
-}
-
-
-def admin_required(f):
-    """Decorator to protect admin routes with session-based auth."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("admin_authenticated"):
-            # For API endpoints return 401 JSON; for pages redirect to login
-            if request.is_json or request.method == "POST":
-                return jsonify({"error": True, "errors": ["Authentication required"], "auth_required": True}), 401
-            return redirect(url_for("admin_login_page"))
-        return f(*args, **kwargs)
-    return decorated
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -70,175 +35,78 @@ def admin_required(f):
 # ═══════════════════════════════════════════════════════════════
 
 PATTERN_EXPLANATIONS = {
-    # ── Cycle patterns ────────────────────────────────────────────────────
     "cycle": {
         "title": "🔄 Circular Money Flow",
         "description": "Money flows in a circular loop between accounts",
-        "meaning": "When Account A sends to B, B to C, and C back to A, it creates a suspicious loop. Circular routing is extremely rare in legitimate banking and is a hallmark of money laundering — it disguises the origin of funds by sending them through a chain that loops back.",
-        "risk": "HIGH - Indicates deliberate layering to hide money trails",
-        "ml_classification": "Circular Fund Routing"
+        "meaning": "When Account A sends to B, B to C, and C back to A, it creates a suspicious loop. Often used to obfuscate the original source of money.",
+        "risk": "HIGH - Indicates deliberate layering to hide money trails"
     },
-    # ── Smurfing patterns ─────────────────────────────────────────────────
-    "fan_in_hub": {
-        "title": "🐟 Fan-In Smurfing Hub (Collection Point)",
-        "description": "This account receives transactions from many different senders",
-        "meaning": "Multiple accounts are funneling money into this single hub — a classic collection-point pattern. Criminals recruit 'smurfs' (mules) who each deposit small amounts to stay below reporting thresholds, then the hub consolidates and forwards the pooled funds.",
-        "risk": "HIGH - Collection-point smurfing / threshold evasion",
-        "ml_classification": "Smurfing — Collection Hub"
+    "smurfing": {
+        "title": "🐟 Smurfing Activity",
+        "description": "Many small transactions from/to a single hub account",
+        "meaning": "Multiple accounts sending small amounts to one account (like collecting tips at a bar), or one account distributing to many. Used to bypass transaction thresholds.",
+        "risk": "HIGH - Typical structuring/threshold evasion technique"
     },
-    "fan_out_hub": {
-        "title": "🐟 Fan-Out Smurfing Hub (Distribution Point)",
-        "description": "This account sends transactions to many different receivers",
-        "meaning": "A single account is distributing funds across numerous recipients — a classic fan-out / distribution pattern. After consolidating illicit funds, the controller spreads them out to many accounts, making tracing extremely difficult.",
-        "risk": "HIGH - Distribution-point smurfing / threshold evasion",
-        "ml_classification": "Smurfing — Distribution Hub"
+    "shell": {
+        "title": "🔗 Shell/Pass-Through Account",
+        "description": "Account quickly moves money without adding value",
+        "meaning": "Money enters and quickly exits with minimal delay (e.g., $10,000 in, $9,900 out in 5 minutes). Acts as a middleman.",
+        "risk": "MEDIUM-HIGH - Used to hide the true recipient"
     },
-    "smurfing_peripheral": {
-        "title": "🐟 Smurfing Participant",
-        "description": "This account is part of a smurfing network but is not the central hub",
-        "meaning": "While not the main hub, this account participates in structured fan-in or fan-out transfers. Peripheral mules are often recruited individuals who move money on behalf of the organizer, sometimes unknowingly.",
-        "risk": "MEDIUM - Peripheral participant in smurfing network",
-        "ml_classification": "Smurfing — Peripheral Mule"
-    },
-    # ── Shell / Pass-through patterns ─────────────────────────────────────
-    "shell_passthrough": {
-        "title": "🔗 Shell Pass-Through Account",
-        "description": "Account acts as a relay — money enters and exits quickly with near-zero retention",
-        "meaning": "This account receives funds and almost immediately forwards them onward, keeping little or nothing. It functions purely as a conduit to add an extra hop in the money trail. Pass-through accounts are a key indicator of layering — each additional hop makes it harder for investigators to trace the true source and destination of funds.",
-        "risk": "HIGH - Relay node used to obscure money trail",
-        "ml_classification": "Shell / Pass-Through Layering"
-    },
-    "shell_network_member": {
-        "title": "🔗 Shell Network Member",
-        "description": "Account belongs to a cluster of accounts behaving like shell entities",
-        "meaning": "This account is part of a group that collectively exhibits shell-company-like behavior — high throughput, low retention, and interconnected transfers. Shell networks are used to create complex webs of transactions that frustrate investigators and obscure the beneficial owner of the funds.",
-        "risk": "MEDIUM-HIGH - Member of suspected shell network",
-        "ml_classification": "Shell Network Participant"
-    },
-    # ── Velocity / Rapid pass-through ─────────────────────────────────────
-    "high_velocity": {
-        "title": "⚡ High Transaction Velocity",
-        "description": "Unusually high number of transactions per hour",
-        "meaning": "This account processes transactions at a rate far above normal. Extremely rapid activity often indicates automated or scripted money movement — funds are pushed through as fast as possible before detection systems or account freezes can intervene.",
-        "risk": "MEDIUM-HIGH - Automated rapid money movement",
-        "ml_classification": "High-Velocity Transfers"
-    },
-    "rapid_passthrough": {
+    "velocity": {
         "title": "⚡ Rapid Pass-Through",
-        "description": "Similar amounts received and sent within a very short time window",
-        "meaning": "Money arrives at this account and a similar (or identical) amount leaves within minutes. This 'in-and-out' pattern with tight timing suggests the account is being used purely as a transit point. When amounts also closely match, it strongly indicates automated layering rather than legitimate commercial activity.",
-        "risk": "HIGH - Timed relay with amount matching",
-        "ml_classification": "Rapid Pass-Through Layering"
+        "description": "Money flowing through account very quickly",
+        "meaning": "High-speed transaction chains where similar amounts move through multiple accounts in short time windows. Suggests automatic layering.",
+        "risk": "MEDIUM-HIGH - Pattern of rapid money movement"
     },
-    # ── Layering ──────────────────────────────────────────────────────────
-    "layering_chain": {
-        "title": "📚 Transaction Layering Chain",
-        "description": "Part of a chain where amounts decrease at each step (commission deduction)",
-        "meaning": "A → B ($10,000), B → C ($9,500), C → D ($9,000). Each intermediary deducts a small 'commission' before forwarding the rest. This decreasing-amount chain is a textbook layering technique — it distances the money from its criminal source while rewarding each mule in the chain.",
-        "risk": "MEDIUM-HIGH - Commission-based relay chain indicates professional money laundering",
-        "ml_classification": "Layering — Decreasing-Amount Chain"
+    "layering": {
+        "title": "📚 Transaction Layering",
+        "description": "Chain of transactions with decreasing amounts",
+        "meaning": "A → B ($10k), B → C ($9.5k), C → D ($9k). Each step deducts a small commission. Makes it hard to trace the original source.",
+        "risk": "MEDIUM - Commission-like pattern suggests professional money laundering"
     },
-    # ── Structuring / Threshold avoidance ─────────────────────────────────
     "structuring": {
-        "title": "💰 Structuring / Threshold Avoidance",
-        "description": "Multiple transactions deliberately placed just below a reporting threshold",
-        "meaning": "This account repeatedly transacts amounts just under a regulatory reporting limit (e.g., many $9,800–$9,999 transactions when the threshold is $10,000). Deliberately splitting transactions to avoid mandatory reporting is itself a federal crime (31 USC §5324) and a strong indicator that the account holder is trying to move large sums undetected.",
-        "risk": "HIGH - Deliberate regulatory evasion",
-        "ml_classification": "Structuring — Threshold Avoidance"
+        "title": "💰 Structuring/Threshold Avoidance",
+        "description": "Multiple transactions just below reporting threshold",
+        "meaning": "Intentional breaking of large amounts into smaller chunks (e.g., ten $9,900 transfers instead of one $99k). Illegal to deliberately avoid reporting thresholds.",
+        "risk": "HIGH - Deliberate regulatory evasion"
     },
-    "amount_repetition": {
-        "title": "💰 Repeated Identical Amounts",
-        "description": "Same exact dollar amount appears in many transactions",
-        "meaning": "This account sends or receives the same precise amount over and over. Natural economic activity produces varied amounts; highly repetitive identical amounts suggest automated or scripted transfers, often part of a structured money-moving operation.",
-        "risk": "MEDIUM - Indicates scripted / automated transfers",
-        "ml_classification": "Amount Repetition — Automation Indicator"
+    "community": {
+        "title": "🌐 Suspicious Community Cluster",
+        "description": "Tightly connected group with heavy internal transfers",
+        "meaning": "A group of accounts that heavily transfer money among themselves. Suggests controlled network rather than organic transactions.",
+        "risk": "MEDIUM - Possible money laundering ring"
     },
-    # ── Amount consistency ────────────────────────────────────────────────
+    "new_account": {
+        "title": "✨ New Account Burst",
+        "description": "Newly created account with sudden high transaction volume",
+        "meaning": "Account created recently but immediately shows unusual activity patterns. Often used for one-time money laundering operations.",
+        "risk": "MEDIUM-HIGH - Fresh accounts with suspicious behavior"
+    },
     "amount_consistency": {
         "title": "💵 Unusual Amount Consistency",
-        "description": "Transactions use suspiciously uniform amounts — money in ≈ money out",
-        "meaning": "The total amount received closely matches the total amount sent, with less than 5% retained. In legitimate accounts, inflows and outflows rarely balance this precisely. When they do, it indicates the account is simply passing money through — a hallmark of mule accounts that exist solely to relay funds.",
-        "risk": "MEDIUM - May indicate bot-driven transfers",
-        "ml_classification": "Amount Consistency — Pass-Through Indicator"
+        "description": "Transactions use suspiciously uniform amounts",
+        "meaning": "Many identical amounts (e.g., always exactly $5,000). Natural transactions vary; artificial consistency suggests automation.",
+        "risk": "MEDIUM - May indicate bot-driven transfers"
     },
-    # ── Low entropy ───────────────────────────────────────────────────────
-    "low_entropy": {
-        "title": "📊 Low Transaction Entropy",
-        "description": "Transaction counterparty pattern is highly predictable / concentrated",
-        "meaning": "This account transacts with very few unique counterparties in a highly repetitive way (low Shannon entropy). Normal accounts interact with a variety of parties; a concentrated, predictable pattern suggests an artificial relationship — such as a dedicated mule funneling to or from a single controller.",
-        "risk": "MEDIUM - Lacks natural transaction diversity",
-        "ml_classification": "Low Entropy — Concentrated Pattern"
-    },
-    # ── New account burst ─────────────────────────────────────────────────
-    "new_account_burst": {
-        "title": "✨ New Account Burst",
-        "description": "Recently created account with sudden high transaction volume",
-        "meaning": "This account was created very recently but immediately began processing a large number or high volume of transactions. Legitimate new accounts typically ramp up gradually. A sudden burst suggests the account was opened specifically for a money-laundering operation and may be abandoned once the funds are moved.",
-        "risk": "MEDIUM-HIGH - Fresh account with suspicious burst activity",
-        "ml_classification": "New Account — Burst Activity"
-    },
-    # ── Community / SCC ───────────────────────────────────────────────────
-    "tight_community": {
-        "title": "🌐 Tight Community Cluster",
-        "description": "Member of a tightly interconnected group with heavy internal transfers",
-        "meaning": "This account belongs to a small, densely connected group where most transactions stay within the cluster. Such tight communities are uncommon in normal banking and suggest a coordinated ring — accounts controlled by the same entity or criminal group, moving money among themselves to layer and obscure its origin.",
-        "risk": "MEDIUM - Possible coordinated money laundering ring",
-        "ml_classification": "Community Cluster — Ring Indicator"
-    },
-    # ── Trust adjustment (informational) ──────────────────────────────────
-    "trust_adjusted": {
-        "title": "✅ Trust Multiplier Applied",
-        "description": "Score reduced — high-degree node with stable timing and no cycle involvement",
-        "meaning": "This account has a very high number of counterparties and regular, predictable transaction timing — characteristics of a legitimate merchant or payroll processor. Because it is not involved in any cycles, a trust discount was applied to reduce the false-positive risk.",
-        "risk": "LOW - False-positive control adjustment",
-        "ml_classification": "Trusted Entity Discount"
-    },
-}
-
-# Prefix mapping for dynamic pattern names like cycle_participant_x8, rapid_passthrough_x3, etc.
-_PATTERN_PREFIX_MAP = {
-    "cycle_participant": "cycle",
-    "rapid_passthrough": "rapid_passthrough",
-    "structuring_below": "structuring",
-    "amount_repeat": "amount_repetition",
+    "entropy": {
+        "title": "📊 Low Information Entropy",
+        "description": "Low diversity in transaction patterns",
+        "meaning": "Transactions are too uniform/predictable. Real economic activity varies; this suggests artificially controlled flows.",
+        "risk": "MEDIUM - Pattern lacks natural randomness"
+    }
 }
 
 
 def get_pattern_explanation(pattern_name):
-    """Get explanation for a detected pattern.
-
-    Handles exact matches first, then tries prefix matching for dynamic
-    pattern names (e.g. cycle_participant_x8 → cycle explanation).
-    """
-    # 1. Exact match
+    """Get explanation for a detected pattern."""
     if pattern_name in PATTERN_EXPLANATIONS:
-        info = dict(PATTERN_EXPLANATIONS[pattern_name])
-        info["pattern_id"] = pattern_name
-        return info
-
-    # 2. Prefix match for dynamic names
-    for prefix, key in _PATTERN_PREFIX_MAP.items():
-        if pattern_name.startswith(prefix):
-            info = dict(PATTERN_EXPLANATIONS[key])
-            info["pattern_id"] = pattern_name
-            # Enrich title with specific count if available
-            suffix = pattern_name[len(prefix):]
-            if suffix.startswith("_x"):
-                count = suffix[2:]
-                info["title"] = f"{info['title']} (×{count})"
-            elif suffix.startswith("_below_"):
-                threshold = suffix[7:]
-                info["title"] = f"{info['title']} (below ${threshold})"
-            return info
-
-    # 3. Fallback
+        return PATTERN_EXPLANATIONS[pattern_name]
     return {
         "title": pattern_name,
-        "pattern_id": pattern_name,
-        "description": "Suspicious pattern detected",
-        "meaning": "This pattern was flagged as suspicious by the detection engine. It may indicate unusual transaction behavior that warrants further investigation.",
-        "risk": "MEDIUM",
-        "ml_classification": "General Fraud"
+        "description": "Unknown pattern detected",
+        "meaning": "This pattern indicates suspicious activity",
+        "risk": "MEDIUM"
     }
 
 
@@ -292,24 +160,6 @@ def run_pipeline(df):
         community_results=community_results,
         new_account_results=new_account_results,
     )
-
-    # Run 5-step account analysis
-    account_analyses = analyze_all_accounts(
-        G, simple_G, cleaned_df,
-        cycle_results=cycle_results,
-        velocity_results=velocity_results,
-        layering_results=layering_results,
-        structuring_results=structuring_results,
-    )
-
-    # Store graph + detection objects for later per-account queries
-    _last_analysis["G"] = G
-    _last_analysis["simple_G"] = simple_G
-    _last_analysis["cycle_results"] = cycle_results
-    _last_analysis["velocity_results"] = velocity_results
-    _last_analysis["layering_results"] = layering_results
-    _last_analysis["structuring_results"] = structuring_results
-    _last_analysis["account_analyses"] = account_analyses
 
     elapsed = time.time() - start
 
@@ -497,9 +347,7 @@ def run_pipeline(df):
                 "title": exp.get("title", p),
                 "description": exp.get("description", ""),
                 "meaning": exp.get("meaning", ""),
-                "risk": exp.get("risk", "MEDIUM"),
-                "ml_classification": exp.get("ml_classification", "General Fraud"),
-                "pattern_id": exp.get("pattern_id", p),
+                "risk": exp.get("risk", "MEDIUM")
             })
         
         all_scores.append({
@@ -576,13 +424,6 @@ def analyze():
             df = parse_csv(file_storage=request.files["file"])
 
         results = run_pipeline(df)
-
-        # Store the analyzed data so admin panel / explorer / trace can use it
-        if not results.get("error"):
-            is_valid, _errs, cleaned_df = validate_csv(df)
-            _last_analysis["df"] = cleaned_df if is_valid else df
-            _last_analysis["results"] = results
-
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": True, "errors": [str(e)]})
@@ -684,18 +525,21 @@ def account_explorer():
     """Return ego-graph + stats for a single account."""
     try:
         account_id = request.json.get("account_id", "").strip()
+        use_sample = request.json.get("use_sample", True)
 
         if not account_id:
             return jsonify({"error": True, "errors": ["No account_id provided."]})
 
-        # Use stored data from last analysis; fall back to sample
-        if _last_analysis["df"] is not None:
-            cleaned_df = _last_analysis["df"]
-        else:
+        if use_sample:
             df = generate_sample_csv()
-            is_valid, errors, cleaned_df = validate_csv(df)
-            if not is_valid:
-                return jsonify({"error": True, "errors": errors})
+        else:
+            return jsonify({"error": True, "errors": ["Upload not supported yet — use sample data."]})
+
+        # Validate
+        from utils.validation import validate_csv
+        is_valid, errors, cleaned_df = validate_csv(df)
+        if not is_valid:
+            return jsonify({"error": True, "errors": errors})
 
         result = build_account_graph(cleaned_df, account_id)
         if result is None:
@@ -711,14 +555,11 @@ def account_explorer():
 
 @app.route("/account-list", methods=["POST"])
 def account_list():
-    """Return all account IDs in the current dataset."""
+    """Return all account IDs in the sample dataset for the dropdown."""
     try:
-        # Use stored data from last analysis; fall back to sample
-        if _last_analysis["df"] is not None:
-            cleaned_df = _last_analysis["df"]
-        else:
-            df = generate_sample_csv()
-            _, _, cleaned_df = validate_csv(df)
+        df = generate_sample_csv()
+        from utils.validation import validate_csv
+        _, _, cleaned_df = validate_csv(df)
         all_accounts = sorted(set(cleaned_df["sender_id"]) | set(cleaned_df["receiver_id"]))
         return jsonify({"error": False, "accounts": all_accounts})
     except Exception as e:
@@ -726,64 +567,21 @@ def account_list():
 
 
 # ══════════════════════════════════════════════════════════════════
-# ADMIN AUTH
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/admin/login", methods=["GET"])
-def admin_login_page():
-    """Serve the admin login page."""
-    if session.get("admin_authenticated"):
-        return redirect(url_for("admin_page"))
-    return render_template("admin_login.html")
-
-
-@app.route("/admin/login", methods=["POST"])
-def admin_login():
-    """Authenticate admin credentials."""
-    data = request.get_json(silent=True) or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        session["admin_authenticated"] = True
-        return jsonify({"error": False, "message": "Login successful"})
-    return jsonify({"error": True, "errors": ["Invalid username or password"]}), 401
-
-
-@app.route("/admin/logout", methods=["POST"])
-def admin_logout():
-    """Clear admin session."""
-    session.pop("admin_authenticated", None)
-    return jsonify({"error": False, "message": "Logged out"})
-
-
-# ══════════════════════════════════════════════════════════════════
-# ADMIN PANEL (protected)
+# ADMIN PANEL
 # ══════════════════════════════════════════════════════════════════
 
 @app.route("/admin")
-@admin_required
 def admin_page():
     """Serve the admin panel."""
     return render_template("admin.html")
 
 
 @app.route("/admin/data", methods=["POST"])
-@admin_required
 def admin_data():
     """Return all accounts with scores, patterns for the admin table."""
     try:
-        # Use stored results from last analysis; fall back to sample
-        if _last_analysis["results"] is not None:
-            results = _last_analysis["results"]
-        else:
-            df = generate_sample_csv()
-            results = run_pipeline(df)
-            if not results.get("error"):
-                is_valid, _errs, cleaned_df = validate_csv(df)
-                _last_analysis["df"] = cleaned_df if is_valid else df
-                _last_analysis["results"] = results
-
+        df = generate_sample_csv()
+        results = run_pipeline(df)
         if results.get("error"):
             return jsonify(results)
 
@@ -802,85 +600,7 @@ def admin_data():
         return jsonify({"error": True, "errors": [str(e)]})
 
 
-@app.route("/admin/report", methods=["POST"])
-@admin_required
-def admin_report():
-    """Generate downloadable JSON report in the required output format."""
-    try:
-        overrides = request.json.get("overrides", {}) if request.json else {}
-
-        # Use stored results from last analysis; fall back to sample
-        if _last_analysis["results"] is not None:
-            results = _last_analysis["results"]
-        else:
-            df = generate_sample_csv()
-            results = run_pipeline(df)
-            if not results.get("error"):
-                is_valid, _errs, cleaned_df = validate_csv(df)
-                _last_analysis["df"] = cleaned_df if is_valid else df
-                _last_analysis["results"] = results
-
-        if results.get("error"):
-            return jsonify(results)
-
-        # Build suspicious_accounts list
-        suspicious_accounts = []
-        for s in results["scores"]:
-            # Determine effective status
-            acct_id = s["account_id"]
-            if acct_id in overrides:
-                admin_status = overrides[acct_id].get("status", "")
-            else:
-                admin_status = "flagged" if s["score"] >= 50 else (
-                    "review" if s["score"] >= 25 else "cleared"
-                )
-
-            # Only include flagged/review accounts
-            if admin_status == "cleared":
-                continue
-
-            ring_ids = []
-            for ring in results.get("rings", []):
-                if acct_id in ring.get("members", []):
-                    ring_ids.append(ring.get("ring_id", ""))
-
-            suspicious_accounts.append({
-                "account_id": acct_id,
-                "suspicion_score": s["score"],
-                "detected_patterns": s.get("patterns", []),
-                "ring_id": ring_ids[0] if ring_ids else None,
-            })
-
-        # Build fraud_rings list
-        fraud_rings = []
-        for ring in results.get("rings", []):
-            fraud_rings.append({
-                "ring_id": ring.get("ring_id", ""),
-                "member_accounts": ring.get("members", []),
-                "pattern_type": ring.get("pattern_type", "cycle"),
-                "risk_score": ring.get("risk_score", 0),
-            })
-
-        # Build summary
-        summary = results.get("summary", {})
-        report = {
-            "suspicious_accounts": suspicious_accounts,
-            "fraud_rings": fraud_rings,
-            "summary": {
-                "total_accounts_analyzed": summary.get("total_accounts", 0),
-                "suspicious_accounts_flagged": len(suspicious_accounts),
-                "fraud_rings_detected": len(fraud_rings),
-                "processing_time_seconds": summary.get("processing_time", 0),
-            },
-        }
-
-        return jsonify({"error": False, "report": report})
-    except Exception as e:
-        return jsonify({"error": True, "errors": [str(e)]})
-
-
 @app.route("/admin/trace", methods=["POST"])
-@admin_required
 def admin_trace():
     """Return full transaction trace for a single account."""
     try:
@@ -888,14 +608,10 @@ def admin_trace():
         if not account_id:
             return jsonify({"error": True, "errors": ["No account_id provided."]})
 
-        # Use stored data from last analysis; fall back to sample
-        if _last_analysis["df"] is not None:
-            cleaned_df = _last_analysis["df"]
-        else:
-            df = generate_sample_csv()
-            is_valid, errors, cleaned_df = validate_csv(df)
-            if not is_valid:
-                return jsonify({"error": True, "errors": errors})
+        df = generate_sample_csv()
+        is_valid, errors, cleaned_df = validate_csv(df)
+        if not is_valid:
+            return jsonify({"error": True, "errors": errors})
 
         result = build_account_graph(cleaned_df, account_id)
         if result is None:
@@ -906,144 +622,9 @@ def admin_trace():
         return jsonify({"error": True, "errors": [str(e)]})
 
 
-# ══════════════════════════════════════════════════════════════════
-# ACCOUNT ANALYSIS — 5-STEP BEHAVIORAL CLASSIFICATION
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/admin/account-analysis", methods=["POST"])
-@admin_required
-def admin_account_analysis():
-    """Return 5-step behavioral analysis for all accounts or a single account.
-
-    POST body (JSON):
-        account_id (optional): If provided, analyze just that account.
-                                If omitted, return all account analyses.
-    """
-    try:
-        data = request.get_json(silent=True) or {}
-        target_account = data.get("account_id", "").strip()
-
-        # If we already have cached analyses, use them
-        if _last_analysis["account_analyses"] is not None:
-            analyses = _last_analysis["account_analyses"]
-
-            if target_account:
-                # Find the specific account
-                match = next(
-                    (a for a in analyses if a["account_id"] == target_account),
-                    None,
-                )
-                if match is None:
-                    # Try running a fresh single-account analysis
-                    if _last_analysis["G"] is not None and _last_analysis["df"] is not None:
-                        match = analyze_single_account(
-                            target_account,
-                            _last_analysis["G"],
-                            _last_analysis["simple_G"],
-                            _last_analysis["df"],
-                            _last_analysis["cycle_results"] or {},
-                            _last_analysis["velocity_results"] or {},
-                            _last_analysis["layering_results"] or {},
-                            _last_analysis["structuring_results"] or {},
-                        )
-                    else:
-                        return jsonify({"error": True, "errors": [f"Account '{target_account}' not found."]})
-
-                return jsonify({"error": False, "analysis": match})
-            else:
-                return jsonify({"error": False, "analyses": analyses})
-
-        # No cached data — run the pipeline first
-        if _last_analysis["df"] is not None:
-            cleaned_df = _last_analysis["df"]
-        else:
-            cleaned_df = generate_sample_csv()
-            is_valid, errors, cleaned_df = validate_csv(cleaned_df)
-            if not is_valid:
-                return jsonify({"error": True, "errors": errors})
-
-        # Build graph and run detection
-        G = build_transaction_graph(cleaned_df)
-        simple_G = build_simple_digraph(G)
-        cycle_results = detect_cycles(simple_G)
-        velocity_results = detect_velocity(G, cleaned_df)
-        layering_results = detect_layering(G, cleaned_df)
-        structuring_results = detect_structuring(G, cleaned_df)
-
-        analyses = analyze_all_accounts(
-            G, simple_G, cleaned_df,
-            cycle_results=cycle_results,
-            velocity_results=velocity_results,
-            layering_results=layering_results,
-            structuring_results=structuring_results,
-        )
-
-        # Cache
-        _last_analysis["G"] = G
-        _last_analysis["simple_G"] = simple_G
-        _last_analysis["cycle_results"] = cycle_results
-        _last_analysis["velocity_results"] = velocity_results
-        _last_analysis["layering_results"] = layering_results
-        _last_analysis["structuring_results"] = structuring_results
-        _last_analysis["account_analyses"] = analyses
-
-        if target_account:
-            match = next(
-                (a for a in analyses if a["account_id"] == target_account),
-                None,
-            )
-            if match is None:
-                return jsonify({"error": True, "errors": [f"Account '{target_account}' not found."]})
-            return jsonify({"error": False, "analysis": match})
-
-        return jsonify({"error": False, "analyses": analyses})
-
-    except Exception as e:
-        return jsonify({"error": True, "errors": [str(e)]})
-
-
-@app.route("/account-analysis/<account_id>", methods=["GET"])
-def public_account_analysis(account_id: str):
-    """Public endpoint: get 5-step analysis for a specific account (no auth)."""
-    try:
-        account_id = account_id.strip()
-        if not account_id:
-            return jsonify({"error": True, "errors": ["No account_id provided."]})
-
-        if _last_analysis["account_analyses"] is not None:
-            match = next(
-                (a for a in _last_analysis["account_analyses"]
-                 if a["account_id"] == account_id),
-                None,
-            )
-            if match:
-                return jsonify({"error": False, "analysis": match})
-
-        # Try fresh analysis
-        if _last_analysis["G"] is not None and _last_analysis["df"] is not None:
-            analysis = analyze_single_account(
-                account_id,
-                _last_analysis["G"],
-                _last_analysis["simple_G"],
-                _last_analysis["df"],
-                _last_analysis["cycle_results"] or {},
-                _last_analysis["velocity_results"] or {},
-                _last_analysis["layering_results"] or {},
-                _last_analysis["structuring_results"] or {},
-            )
-            return jsonify({"error": False, "analysis": analysis})
-
-        return jsonify({"error": True, "errors": ["No data analyzed yet. Upload a CSV or run Demo first."]})
-
-    except Exception as e:
-        return jsonify({"error": True, "errors": [str(e)]})
-
-
 if __name__ == "__main__":
     os.makedirs("templates", exist_ok=True)
     os.makedirs("static", exist_ok=True)
     print("\n  Money Muling Detection Engine — GUI")
     print("  Open http://localhost:5000 in your browser\n")
-    port = int(os.environ.get("PORT", 5000))
-    debug = os.environ.get("FLASK_ENV") != "production"
-    app.run(debug=debug, host="0.0.0.0", port=port)
+    app.run(debug=True, port=5000)
